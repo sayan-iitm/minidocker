@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# pre-flight.sh — Paradox 2026 workshop "Containers from unshare"
+# pre-flight.sh — Paradox 2026 workshop
+# "Build Your Own Mini Docker: Understanding Containers from Scratch"
 # version: 2.0   (strict mode)
+# repo:    https://github.com/sayan-iitm/minidocker
 #
 # Run this inside the Linux you plan to bring on workshop day.
 #
-#   curl -sSL https://[repo-url]/pre-flight.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/sayan-iitm/minidocker/refs/heads/master/pre-flight.sh | bash
 #   or:  bash pre-flight.sh
 #
 # This script is INTENTIONALLY strict. Every check that could fail on
@@ -68,7 +70,7 @@ fail() {
 
 # ==========================================================================
 hr
-bold "Paradox 2026 — Containers from unshare — pre-flight v$SCRIPT_VERSION"
+bold "Paradox 2026 — Build Your Own Mini Docker — pre-flight v$SCRIPT_VERSION"
 echo "report:  $REPORT"
 echo "date:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "user:    $(id -un) (uid=$(id -u))"
