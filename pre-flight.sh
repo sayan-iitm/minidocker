@@ -244,7 +244,12 @@ build_inner() {
   # at compose time; \$PATH stays literal for the inner shell to expand.
   cat <<EOF
 set -e
-export PATH=/usr/sbin:/sbin:\$PATH:/usr/lib/klibc/bin
+# Bake every standard bin/sbin path in explicitly. Don't trust the host's
+# inherited \$PATH: AL2023's default ec2-user PATH is /usr/local/bin:/usr/bin:
+# /usr/local/sbin:/usr/sbin — no /bin — so after pivot_root the Alpine
+# /bin/mount and /bin/umount are unreachable and we'd fail with
+# "mount: command not found". Klibc is last as a final pivot_root fallback.
+export PATH=/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/lib/klibc/bin
 mount --make-rprivate /
 mount --bind '$1' '$1'
 mount --make-private '$1'
