@@ -461,12 +461,50 @@ else
   if curl -fsSL -o "$ALPINE_TGZ" "$ALPINE_URL" 2>/dev/null \
      || wget -qO "$ALPINE_TGZ" "$ALPINE_URL" 2>/dev/null; then
     mkdir -p "$ROOTFS_DIR"
-    if tar -xzf "$ALPINE_TGZ" -C "$ROOTFS_DIR" 2>/dev/null; then
-      ok "rootfs extracted ($(du -sh "$ROOTFS_DIR" | cut -f1))"
+    # -p preserves the archive's exact permission bits (otherwise non-root
+    # tar applies the user's umask, which on some configs strips +x from
+    # files and gives us a non-working rootfs).
+    TAR_ERR=$(tar -xpzf "$ALPINE_TGZ" -C "$ROOTFS_DIR" 2>&1 >/dev/null)
+    TAR_RC=$?
+    if [ $TAR_RC -ne 0 ]; then
+      fail 12 "tar extract failed (exit $TAR_RC)" "tarball did not extract" \
+"Delete $ALPINE_TGZ and re-run. If it keeps failing, your filesystem may be
+out of space, read-only, or the download was corrupted.
+tar stderr (first 5 lines):
+$(echo "$TAR_ERR" | head -5 | sed 's/^/  /')"
+    elif [ ! -x "$ROOTFS_DIR/bin/sh" ]; then
+      # tar said OK but the rootfs is unusable. Figure out exactly why so
+      # the student doesn't get stuck re-running the same thing.
+      REASON="unknown"
+      FIX="Wipe and retry with verbose tar:
+  rm -rf $ROOTFS_DIR $ALPINE_TGZ
+  re-run this script"
+      if [ ! -e "$ROOTFS_DIR/bin/sh" ]; then
+        REASON="/bin/sh missing — tar skipped or failed silently on critical files"
+        if [ -n "$TAR_ERR" ]; then
+          FIX="tar produced warnings/errors (first 10 lines):
+$(echo "$TAR_ERR" | head -10 | sed 's/^/  /')
+$FIX"
+        fi
+      elif [ -L "$ROOTFS_DIR/bin/sh" ]; then
+        TARGET=$(readlink "$ROOTFS_DIR/bin/sh")
+        if [ ! -e "$ROOTFS_DIR/bin/sh" ]; then
+          REASON="/bin/sh is a symlink to '$TARGET' but the target was not extracted"
+        else
+          REASON="/bin/sh -> $TARGET exists but the target lacks +x permission"
+        fi
+      else
+        REASON="/bin/sh exists but lacks +x permission (tar dropped mode bits)"
+      fi
+      # Mount-flag check — noexec on /home or /tmp would also break things
+      # later even if the bits look right. Worth surfacing.
+      MNT_OPTS=$(findmnt -T "$ROOTFS_DIR" -no OPTIONS 2>/dev/null || true)
+      if echo "$MNT_OPTS" | grep -q 'noexec'; then
+        REASON="$REASON  (filesystem mounted noexec: $MNT_OPTS — workshop will never run from here, move \$HOME or use a different VM)"
+      fi
+      fail 12 "rootfs extracted but unusable" "$REASON" "$FIX"
     else
-      fail 12 "tar extract failed" "the downloaded tarball did not extract" \
-"Delete $ALPINE_TGZ and re-run. If it keeps failing, your /tmp or home filesystem
-may be out of space or read-only."
+      ok "rootfs extracted and verified ($(du -sh "$ROOTFS_DIR" | cut -f1))"
     fi
   else
     fail 12 "Download failed" "could not GET $ALPINE_URL" \
@@ -481,8 +519,20 @@ bold "[13/14] End-to-end pivot_root inside unprivileged userns"
 echo "  why: this is what CP4 actually does. The only test that catches the"
 echo "       'unshare -Ur passes but bind mount inside denied' failure mode."
 if [ ! -x "$ROOTFS_DIR/bin/sh" ]; then
-  fail 13 "Cannot run end-to-end test" "rootfs missing — check 12 must pass first" \
-"Resolve check 12, then re-run."
+  # Be specific about why so the user doesn't see a confusing "missing"
+  # when check 12 just said it extracted successfully.
+  if [ ! -e "$ROOTFS_DIR/bin/sh" ]; then
+    DETAIL="$ROOTFS_DIR/bin/sh does not exist (rootfs incomplete)"
+  elif [ -L "$ROOTFS_DIR/bin/sh" ] && [ ! -e "$ROOTFS_DIR/bin/sh" ]; then
+    DETAIL="$ROOTFS_DIR/bin/sh is a broken symlink to '$(readlink "$ROOTFS_DIR/bin/sh")'"
+  else
+    DETAIL="$ROOTFS_DIR/bin/sh exists but is not executable ($(ls -ld "$ROOTFS_DIR/bin/sh" 2>/dev/null | awk '{print $1, $3":"$4}'))"
+  fi
+  fail 13 "Cannot run end-to-end test" "$DETAIL" \
+"Wipe and re-extract:
+  rm -rf $ROOTFS_DIR $WORKDIR/alpine-minirootfs.tar.gz
+  re-run this script
+If that doesn't help, check 12 will print precisely what failed."
 else
   # Non-destructive: we run the full pivot, then exit. We capture stdout
   # and a sentinel to verify the pivot actually happened.
