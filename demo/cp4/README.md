@@ -11,10 +11,13 @@ bash run.sh
 **Watch for:** inside, `cat /etc/os-release` says Alpine, and `ls /` shows Alpine's
 directories — not the host's. You're in a different filesystem entirely.
 
-**The three gotchas (all commented in `run.sh`):**
+**The gotchas (all commented in `run.sh`):**
 
 1. `mount --make-rprivate /` — `pivot_root` refuses while `/` is "shared" (systemd's default).
-2. `mount --bind . .` — `pivot_root` requires the new root to be a mount point.
+2. **Bind the rootfs to itself, *then* `cd` into it** — `pivot_root` requires the new root
+   to be a mount point. If you `cd` in *before* the bind, your shell's working directory
+   is pinned to the plain directory underneath, so `pivot_root .` sees a non-mount-point
+   and fails with `Invalid argument`. Bind first, `cd` after.
 3. `hash -r` — bash cached old command paths; flush them or the next `mount` "vanishes".
 
 This is `chroot` done properly: `chroot` only changes the view, `pivot_root` swaps the

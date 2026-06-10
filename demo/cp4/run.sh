@@ -5,8 +5,8 @@
 # has its OWN root filesystem. pivot_root swaps "/" for a directory we choose
 # (an extracted Alpine), then throws the old root away so it can't be reached.
 #
-# This is the one fiddly checkpoint. The comments explain each line — the three
-# gotchas (make-rprivate, the bind-mount, hash -r) trip up everyone the first time.
+# This is the one fiddly checkpoint. The comments explain each line — the
+# gotchas (make-rprivate, bind-then-cd order, hash -r) trip up everyone first time.
 
 set -e
 
@@ -34,13 +34,20 @@ unshare --user --map-root-user \
     # Make our private mount namespace fully private. Host is unaffected.
     mount --make-rprivate /
 
-    # pivot_root requires the new root to be a mount point, so bind it to itself.
-    cd "$ROOTFS"
-    mount --bind . .
-    mount --make-private .
+    # pivot_root requires the new root to be its OWN mount point, so bind the
+    # rootfs directory onto itself to turn it into one.
+    mount --bind "$ROOTFS" "$ROOTFS"
+    mount --make-private "$ROOTFS"
 
-    # A place to stash the old root for a moment.
-    mkdir -p .old_root
+    # A place to stash the old root for a moment (must live inside the new root).
+    mkdir -p "$ROOTFS/.old_root"
+
+    # Step INTO the rootfs only AFTER the bind. Order matters: your shells
+    # working directory is pinned the moment you cd. If you cd in first and
+    # bind afterwards, "." still points at the plain directory underneath the
+    # new mount, and pivot_root rejects it with "Invalid argument" because "."
+    # isnt a mount point. cd-ing after the bind lands us on the new mount.
+    cd "$ROOTFS"
 
     # The swap: "." becomes the new /, old root moves under /.old_root
     pivot_root . .old_root
