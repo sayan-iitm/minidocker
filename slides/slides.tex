@@ -1,0 +1,196 @@
+% Build Your Own Mini Docker — Paradox 2026 workshop slides.
+% Beamer + metropolis, compiled with XeLaTeX (see Makefile).
+% Slides are an AID — they hold the headline, you speak the rest. Keep them light.
+\documentclass[10pt,aspectratio=169]{beamer}
+\usetheme{metropolis}
+\metroset{numbering=fraction, progressbar=frametitle, sectionpage=progressbar}
+
+\usepackage{booktabs}
+\usepackage{listings}
+
+% Light monospace style for the handful of command snippets we show.
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  aboveskip=0.4em, belowskip=0.4em,
+}
+\newcommand{\cmd}[1]{\texttt{\small #1}}
+
+\title{Build Your Own Mini Docker}
+\subtitle{Understanding containers from scratch}
+\author{Sayan}
+\date{Paradox 2026 \quad\textbar\quad IIT Madras \quad\textbar\quad 11 June}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================ HOOK
+\begin{frame}[standout]
+  What is a container,\\[0.3em]
+  \emph{in syscalls?}
+\end{frame}
+
+\begin{frame}[fragile]{Before we touch any of that}
+  \begin{itemize}
+    \item Entry ticket: a \alert{green pre-flight} on your laptop.
+    \item Get the code:
+  \end{itemize}
+  \begin{lstlisting}
+git clone https://github.com/sayan-iitm/minidocker
+cd minidocker
+  \end{lstlisting}
+  \begin{itemize}
+    \item Fell behind at any point? \cmd{bash demo/cpN/run.sh}.
+  \end{itemize}
+\end{frame}
+
+% ============================================================ NAMESPACES
+\section{Namespaces}
+
+\begin{frame}{One idea, seven times}
+  \begin{center}
+    \Large A namespace is an \alert{isolated view} of one global thing.
+  \end{center}
+  \vspace{1em}
+  \begin{center}
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{mount}  & the filesystem tree \\
+    \textbf{UTS}    & the hostname \\
+    \textbf{PID}    & process IDs \\
+    \textbf{net}    & interfaces, routes, ports \\
+    \textbf{user}   & uid / gid — root inside $\neq$ root outside \\
+    \textbf{IPC}    & shared memory, message queues \\
+    \textbf{cgroup} & the cgroup tree you can see \\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+\end{frame}
+
+\begin{frame}[fragile]{One command runs the lot}
+  \begin{lstlisting}
+unshare --uts --pid --mount --user --net --ipc --cgroup ...
+  \end{lstlisting}
+  \begin{itemize}
+    \item \cmd{lsns} — the namespaces you're already in.
+    \item The next \alert{$\sim$100 lines of bash} just glue these together.
+  \end{itemize}
+\end{frame}
+
+% ============================================================ THE BUILD
+\section{100 lines of bash}
+
+\begin{frame}{Where we're going}
+  \begin{enumerate}
+    \item \textbf{CP1} — hostname \hfill {\small UTS}
+    \item \textbf{CP2} — our own process list \hfill {\small PID + mount}
+    \item \textbf{CP3} — drop \cmd{sudo} \hfill {\small user}
+    \item \textbf{CP4} — our own root filesystem \hfill {\small pivot\_root}
+    \item \textbf{CP5} — a limit the kernel enforces \hfill {\small cgroups}
+  \end{enumerate}
+  \vspace{1em}
+  \begin{center}
+    \small then tie it together $\rightarrow$ \cmd{mini-docker.sh}
+  \end{center}
+  \vfill
+  {\footnotesize Lost? \cmd{bash demo/cpN/run.sh} catches you up.}
+\end{frame}
+
+% ============================================================ PID 1
+\begin{frame}{Ctrl-C did nothing. Why?}
+  \begin{itemize}
+    \item Inside the container, our shell is \alert{PID 1}.
+    \item The kernel \alert{drops} \cmd{SIGINT}/\cmd{SIGTERM} to PID 1 unless it
+          installs a handler.
+    \item Real runtimes ship a tiny init (\cmd{tini}) that becomes PID 1,
+          forwards signals, reaps zombies.
+  \end{itemize}
+  \vspace{1em}
+  \begin{center}
+    \Large That is what \alert{\texttt{docker run -{}-init}} is for.
+  \end{center}
+\end{frame}
+
+% ============================================================ WHAT DOCKER ADDS
+\section{What Docker adds on top}
+
+\begin{frame}{Images — OCI}
+  \begin{itemize}
+    \item A tarball of \alert{layers} + metadata (what to run, env, ports).
+    \item Our \cmd{rootfs/} was step one of this, by hand.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Layers — OverlayFS}
+  \begin{itemize}
+    \item Stack read-only layers; add one thin \alert{writable} layer on top.
+    \item Share the base across containers $\Rightarrow$ fast, cheap.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Dockerfile — the build}
+  \begin{itemize}
+    \item A recipe. Each instruction $\rightarrow$ one cached layer.
+    \item Reproducible images instead of "works on my machine".
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Registries}
+  \begin{itemize}
+    \item \cmd{push} / \cmd{pull} images by name + tag.
+    \item Docker Hub, GHCR, your own — just content-addressed blobs.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Networking \& security}
+  \begin{itemize}
+    \item bridge + \cmd{veth} pairs + \cmd{iptables} $\rightarrow$ real container networking.
+    \item seccomp, capabilities, AppArmor $\rightarrow$ shrink what the container can do.
+    \item \alert{\texttt{-{}-init}} — the PID-1 fix we just met.
+  \end{itemize}
+\end{frame}
+
+% ============================================================ GOBOXD BRIDGE
+\section{The bridge: goboxd}
+
+\begin{frame}{Same problems — we hit them naively}
+  \begin{center}
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Our bash} & \textbf{goboxd spec hole} \\
+    \midrule
+    \cmd{pivot\_root} + \cmd{umount}   & path traversal \\
+    run a process, not \cmd{bash -c "..."} & shell-style commands \\
+    user ns + \cmd{-{}-map-root-user}   & UID collisions under load \\
+    (not handled)                       & unbounded output — \cmd{rlimit} \\
+    \cmd{trap} cleanup                  & stale jail directories \\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+\end{frame}
+
+\begin{frame}{nsjail = our script, hardened}
+  \begin{itemize}
+    \item Everything we wrote, in $\sim$6000 lines of C.
+    \item \alert{plus} seccomp, capability dropping, a config language.
+    \item \textbf{goboxd}: wrap it in a Go service that runs untrusted code.
+  \end{itemize}
+\end{frame}
+
+% ============================================================ CLOSE
+\begin{frame}{Your turn}
+  \begin{itemize}
+    \item Catch the \alert{goboxd} finals — tomorrow. You've got the mental model now.
+    \item Repo \& slides: \cmd{github.com/sayan-iitm/minidocker}
+    \item Stuck / curious: GitHub Discussions on the repo.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Questions?
+\end{frame}
+
+\end{document}

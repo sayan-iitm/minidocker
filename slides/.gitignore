@@ -1,0 +1,11 @@
+# LaTeX build artifacts (the PDF is kept; everything else is regenerated)
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.vrb
+*.xdv
