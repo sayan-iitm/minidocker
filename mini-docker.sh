@@ -58,6 +58,13 @@ set -e
 # on Ubuntu 26.04+ without util-linux-extra.
 export PATH=/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/lib/klibc/bin
 
+# Bring loopback up. A fresh net namespace has only \`lo\`, and it starts DOWN,
+# so anything that talks to 127.0.0.1 (redis-cli and most clients) can't connect
+# until we raise it. Do this BEFORE pivot_root so we use the host's iproute2 —
+# the container rootfs may not ship \`ip\`. The netns is ours (userns-owned), so
+# we hold CAP_NET_ADMIN here. This is one of the things \`docker run\` does for you.
+ip link set lo up 2>/dev/null || true
+
 # 0. systemd marks / as MS_SHARED; pivot_root refuses on shared parents.
 #    Inside our private mount namespace we de-shareify everything. This
 #    affects the host nothing — it's a property of OUR namespace.
